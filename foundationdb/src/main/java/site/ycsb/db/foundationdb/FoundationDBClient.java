@@ -205,6 +205,10 @@ public class FoundationDBClient extends DB {
           byte[] r = tr.get(Tuple.from(rowKey).pack()).join();
           return r;
         });
+      if (row == null) {
+        logger.debug("key not fount: {}", rowKey);
+        return Status.NOT_FOUND;
+      }
       Tuple t = Tuple.fromBytes(row);
       if (t.size() == 0) {
         logger.debug("key not fount: {}", rowKey);
@@ -228,6 +232,10 @@ public class FoundationDBClient extends DB {
     try {
       Status s = db.run(tr -> {
           byte[] row = tr.get(Tuple.from(rowKey).pack()).join();
+          if (row == null) {
+            logger.debug("key not fount: {}", rowKey);
+            return Status.NOT_FOUND;
+          }
           Tuple o = Tuple.fromBytes(row);
           if (o.size() == 0) {
             logger.debug("key not fount: {}", rowKey);
