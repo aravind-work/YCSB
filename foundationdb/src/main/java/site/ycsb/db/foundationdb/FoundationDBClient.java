@@ -25,6 +25,9 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
 import site.ycsb.*;
 
+import java.io.FileOutputStream;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -37,7 +40,7 @@ import static java.util.stream.Collectors.toList;
 
 public class FoundationDBClient extends DB {
   private static final String API_VERSION = "foundationdb.apiversion";
-  private static final String API_VERSION_DEFAULT = "620";
+  private static final String API_VERSION_DEFAULT = "710";
   private static final String CLUSTER_FILE = "foundationdb.clusterfile";
   private static final String CLUSTER_FILE_DEFAULT = "./fdb.cluster";
   private static final String DB_NAME = "foundationdb.dbname";
@@ -301,14 +304,57 @@ public class FoundationDBClient extends DB {
     String apiVersion = props.getProperty(API_VERSION, API_VERSION_DEFAULT);
     String clusterFile = props.getProperty(CLUSTER_FILE, CLUSTER_FILE_DEFAULT);
     String dbBatchSize = props.getProperty(DB_BATCH_SIZE, DB_BATCH_SIZE_DEFAULT);
+    /*
+      This is a CRUDE attempt to fix the following error.
+
+      `com.apple.foundationdb.FDBException: API version may be set only once`
+
+      https://forums.foundationdb.org/t/api-version-may-be-set-only-once-exception/2221
+
+      in newer version foundationdb client is a singleton. if we try to reinitialize it it will error out.
+      I'm using a file lock as we must coordinate ith other threads from inside the tread with no initialisation outside.
+      Probably better options exist but they are TBD
+    */
+    FileOutputStream fileOutputStream = null;
+    boolean lockAquiered = false;
+    while (!lockAquiered) {
+      try {
+        fileOutputStream = new FileOutputStream("/tmp/testfile.txt");
+        FileChannel channel = fileOutputStream.getChannel();
+        FileLock lock = channel.lock();
+      } catch (Exception e) {
+        continue;
+      }
+      lockAquiered = true;
+    }
 
     logger.info("API Version: {}", apiVersion);
     logger.info("Cluster File: {}\n", clusterFile);
     logger.info("DB Batch size: {}", dbBatchSize);
 
     try {
-      dbName = props.getProperty(DB_NAME, DB_NAME_DEFAULT);
+      fdb = FDB.instance();
+    } catch (FDBException e) {
       fdb = FDB.selectAPIVersion(Integer.parseInt(apiVersion.trim()));
+    }
+
+    try {
+      dbName = props.getProperty(DB_NAME, DB_NAME_DEFAULT);
+      /*
+
+      Apparently we must also only call once open, and then share the db between threads.
+
+      com.apple.foundationdb.FDBException: Network can be configured only once
+      at com.apple.foundationdb.FDB.Network_setup(Native Method)
+      at com.apple.foundationdb.FDB.startNetwork(FDB.java:495)
+      at com.apple.foundationdb.FDB.startNetwork(FDB.java:458)
+      at com.apple.foundationdb.FDB.open(FDB.java:434)
+      at com.apple.foundationdb.FDB.open(FDB.java:408)
+      at com.apple.foundationdb.FDB.open(FDB.java:364)
+      at site.ycsb.db.foundationdb.FoundationDBClient.init(FoundationDBClient.java:333)
+
+
+       */
       db = fdb.open(clusterFile);
       batchSize = Integer.parseInt(dbBatchSize);
 
@@ -318,6 +364,12 @@ public class FoundationDBClient extends DB {
     } catch (NumberFormatException e) {
       logger.error(MessageFormatter.format("Invalid value for apiversion property: {}", apiVersion).getMessage(), e);
       throw new DBException(e);
+    }
+
+    try {
+      fileOutputStream.close();
+    } catch (Exception e) {
+      logger.error(MessageFormatter.format("Error closing file: {}", apiVersion).getMessage(), e);
     }
   }
 }
