@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
 import site.ycsb.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -44,6 +45,20 @@ public class FoundationDBClient extends DB {
   private static final String DB_NAME_DEFAULT = "DB";
   private static final String DB_BATCH_SIZE_DEFAULT = "0";
   private static final String DB_BATCH_SIZE = "foundationdb.batchsize";
+  private static final String DATACENTER_ID = "foundationdb.datacenterid";
+
+  private static final String DATACENTER_ID_DEFAULT = "";
+  private static final String TLS_VERIFY_PEERS = "foundationdb.check_peers";
+  private static final String TLS_VERIFY_PEERS_DEFAULT = "Check.Valid=0";
+
+  private static final String TLS_CERTIFICATE_FILE = "foundationdb.certificate";
+  private static final String TLS_CERTIFICATE_FILE_DEFAULT = "/etc/foundationdb/pki/client-server.crt";
+
+  private static final String TLS_KEY_FILE = "foundationdb.key";
+  private static final String TLS_KEY_FILE_DEFAULT = "/etc/foundationdb/pki/client-server.key";
+
+  private static final String TLS_CA_FILE = "foundationdb.ca";
+  private static final String TLS_CA_FILE_DEFAULT = "/etc/foundationdb/pki/ca.crt";
   private static Logger logger = LoggerFactory.getLogger(FoundationDBClient.class);
   private static FDB fdb;
   private static Database db;
@@ -320,15 +335,38 @@ public class FoundationDBClient extends DB {
     String clusterFile = props.getProperty(CLUSTER_FILE, CLUSTER_FILE_DEFAULT);
     String dbBatchSize = props.getProperty(DB_BATCH_SIZE, DB_BATCH_SIZE_DEFAULT);
 
+    String datacenterId = props.getProperty(DATACENTER_ID, DATACENTER_ID_DEFAULT);
+
+    String tlsVerifyPeers = props.getProperty(TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_DEFAULT);
+    String tlsCertificateFile = props.getProperty(TLS_CERTIFICATE_FILE, TLS_CERTIFICATE_FILE_DEFAULT);
+    String tlsKeyFile = props.getProperty(TLS_KEY_FILE, TLS_KEY_FILE_DEFAULT);
+    String tlsCaFile = props.getProperty(TLS_CA_FILE, TLS_CA_FILE_DEFAULT);
+
+
     logger.info("API Version: {}", apiVersion);
-    logger.info("Cluster File: {}\n", clusterFile);
+    logger.info("Cluster File: {}", clusterFile);
     logger.info("DB Batch size: {}", dbBatchSize);
+
+    logger.info("tlsVerifyPeers: {}", tlsVerifyPeers);
+    logger.info("tlsCertificateFile: {}", tlsCertificateFile);
+    logger.info("tlsKeyFile: {}", tlsKeyFile);
+    logger.info("tlsCaFile: {}", tlsCaFile);
 
     try {
       dbName = props.getProperty(DB_NAME, DB_NAME_DEFAULT);
       fdb = FDB.selectAPIVersion(Integer.parseInt(apiVersion.trim()));
+      fdb.options().setTLSVerifyPeers(tlsVerifyPeers.getBytes(StandardCharsets.UTF_8));
+      fdb.options().setTLSCertPath(tlsCertificateFile);
+      fdb.options().setTLSKeyPath(tlsKeyFile);
+      fdb.options().setTLSCaPath(tlsCaFile);
+
       db = fdb.open(clusterFile);
       batchSize = Integer.parseInt(dbBatchSize);
+
+      if (!Objects.equals(datacenterId, "")) {
+        db.options().setDatacenterId(datacenterId);
+      }
+
       isFDBInitialized = true;
     } catch (FDBException e) {
       logger.error(MessageFormatter.format("Error in database operation: {}", "init").getMessage(), e);
